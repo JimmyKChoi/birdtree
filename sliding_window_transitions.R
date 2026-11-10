@@ -26,12 +26,17 @@ library(corHMM)
 
 ## convert corHMM solution (NA diagonal, may contain NA for disallowed
 ## transitions) into proper Q matrix (rows = from, cols = to, rows sum to 0)
-corhmm_Q <- function(fit) {
+## added fix for makeSimmap parsing states differently (0,1,2 vs 1,2,3)
+corhmm_Q <- function(fit, dat = NULL) {
   Q <- fit$solution
   Q[is.na(Q)] <- 0
   diag(Q) <- -rowSums(Q)
   ## "(1,R1)" -> "1"
   rownames(Q) <- colnames(Q) <- sub("^\\((.*),R1\\)$", "\\1", rownames(Q))
+  if (!is.null(dat)) {
+    leg <- getStateMat4Dat(dat)$legend # names = corHMM index, values = data codes
+    rownames(Q) <- colnames(Q) <- unname(leg[rownames(Q)])
+  }
   Q
 }
 
