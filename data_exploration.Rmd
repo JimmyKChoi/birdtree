@@ -1,0 +1,114 @@
+---
+title: "avonet"
+output: html_document
+date: "2026-09-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ape)
+library(clootl)
+library(corHMM)
+library(phylolm)
+library(phytools)
+library(readxl)
+library(sensiPhy)
+```
+
+```{r}
+avonet <- read_excel("AVONET Supplementary dataset 1.xlsx")
+avonet_birdtree <- read_excel("avonet_birdtree.xlsx")
+```
+
+```{r}
+dev.new(width = 16, height = 6)
+boxplot(avonet_birdtree[,9:14], main = "Distributions of morphological variables in birds", horizontal = FALSE, outpch = 19, outcex = 0.5)
+stripchart(avonet_birdtree[,9:14], method = "jitter", jitter = 0.1, vertical = TRUE, cex = 0.2, add = TRUE)
+```
+
+```{r}
+## extracting most recent birdtree from clootl package
+openbirdtree <- extractTree(species = "all_species", label_type = "scientific", taxonomy_year = "2025", version = "1.7")
+openbirdtree$tip.label <- gsub("_", " ", openbirdtree$tip.label)
+no_data_tips <- setdiff(openbirdtree$tip.label, avonet_birdtree$Species3)
+no_data_tips <- append(no_data_tips, avonet_birdtree$Species3[which(avonet_birdtree$Migration == "NA")])
+openbirdtree_avonet <- drop.tip(openbirdtree, no_data_tips)
+passerine_names <- avonet_birdtree$Species3[which(avonet_birdtree$Order3 == "Passeriformes")]
+no_tip_passerines <- setdiff(passerine_names, openbirdtree_avonet$tip.label)
+passerine_tips <- passerine_names[!(passerine_names %in% no_tip_passerines)]
+passerine_tree <- keep.tip(openbirdtree_avonet, passerine_tips)
+```
+
+```{r}
+## fit models of trait evolution
+migration.trait <- setNames(avonet_birdtree$Migration, avonet_birdtree$Species3)
+migration.trait <- factor(migration.trait, levels = c("1", "2", "3"))
+fitER <- fitMk(openbirdtree_avonet, migration.trait, model = "ER")
+fitARD <- fitMk(openbirdtree_avonet, migration.trait, model = "ARD")
+## stepwise model (sedentary -> partial -> fully migratory, irreversible, diff. rates)
+fitStepwise <- fitMk(openbirdtree_avonet, migration.trait, model = matrix(
+                     c(0, 1, 0,
+                       0, 0, 2,
+                       0, 0, 0),
+                     nrow = 3, byrow = TRUE,
+                     dimnames = list(c("1","2","3"), c("1","2","3"))))
+## divergent model (sedentary -> partial or sedentary -> fully migratory, irreversible, diff. rates)
+fitDivergent <- fitMk(openbirdtree_avonet, migration.trait, model = matrix(
+                      c(0, 1, 2,
+                        0, 0, 0,
+                        0, 0, 0),
+                      nrow = 3, byrow = TRUE,
+                      dimnames = list(c("1","2","3"), c("1","2","3"))))
+## stepwise but reversible
+fitStepwiseRev <- fitMk(openbirdtree_avonet, migration.trait, model = matrix(
+                     c(0, 1, 0,
+                       3, 0, 2,
+                       0, 4, 0),
+                     nrow = 3, byrow = TRUE,
+                     dimnames = list(c("1","2","3"), c("1","2","3"))))
+## divergent bur reversible
+fitDivergentRev <- fitMk(openbirdtree_avonet, migration.trait, model = matrix(
+                      c(0, 1, 2,
+                        3, 0, 0,
+                        4, 0, 0),
+                      nrow = 3, byrow = TRUE,
+                      dimnames = list(c("1","2","3"), c("1","2","3"))))
+## extract AIC values for each model
+aic <- c(AIC(fitER), AIC(fitARD), AIC(fitStepwise), AIC(fitDivergent), AIC(fitStepwiseRev), AIC(fitDivergentRev))
+## print summary table
+data.frame(model=c("ER", "ARD", "Stepwise", "Divergent", "StepwiseRev", "DivergentRev"),
+logL = c(logLik(fitER), logLik(fitARD), logLik(fitStepwise), logLik(fitDivergent), logLik(fitStepwiseRev), logLik(fitDivergentRev)),
+AIC = aic, delta.AIC = aic - min(aic))
+```
+
+```{r}
+## create new data frame for corHMM, transition from 1, 2, 3 to 0, 1, 2
+migration.data <- data.frame(Genus_sp = names(migration.trait),
+migration.trait = as.numeric(migration.trait) - 1)
+## estimate marginal ancestral states under ARD (best performing) model
+fit.marginal.ARD <- corHMM(openbirdtree_avonet, migration.data, node.states = "marginal", rate.cat = 1, rate.mat = matrix(c(0, 1, 2,
+                       3, 0, 4,
+                       5, 6, 0),
+                nrow = 3, byrow = TRUE,
+                dimnames = list(c("1","2","3"), c("1","2","3"))))
+## estimating under slightly worse-performing StepwiseRev (second best) model
+fit.marginal.steprev <- corHMM(openbirdtree_avonet, migration.data, node.states = "marginal", rate.cat = 1, rate.mat = matrix(c(0, 1, 0,
+                                  3, 0, 2,
+                                  0, 4, 0),
+                     nrow = 3, byrow = TRUE,
+                     dimnames = list(c("1","2","3"), c("1","2","3"))))
+```
+
+```{r}
+## plot results of marginal ASR, setting colors for plotting
+cols <- setNames(c("#0072B2", "#E69F00", "#009E73"), levels(migration.trait))
+trait.tip.data <- data.frame(Migration = migration.trait,
+                             row.names = names(migration.trait))
+plotFanTree.wTraits(openbirdtree_avonet, trait.tip.data, type = "arc",
+                      colors = list(cols), ftype = "off")
+## add legend
+legend("bottomleft", legend = levels(migration.trait), pch = 22,
+pt.cex = 1.5, pt.bg = cols, bty = "n", cex =  0.8)
+## add node labels showing marginal ancestral states
+nodelabels(pie = fit.marginal$states, piecol = cols, cex = 0.2)
+```
