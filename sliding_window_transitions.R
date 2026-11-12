@@ -13,7 +13,7 @@
 ##    rates also calculated
 ## 3. repeat step 2 on histories simulated under the constant-rate model, 
 ##    windows above null have elevated rates
-## 4. (optional) likelihood tests, fit model with a separate Q
+## 4. (to do) likelihood tests, fit model with a separate Q
 ##    inside window vs. outside, compare with constant-Q model
 
 
